@@ -38,24 +38,27 @@ def download_model_weights(urls=urls):
         if not os.path.exists(cached_file):
             sys.stderr.write('Downloading: "{}" to {}\n'.format(url, cached_file))
             utils.download_url_to_file(url, cached_file, progress=True)
+    return model_dir
 
-download_model_weights()
-model_dir = pathlib.Path.home().joinpath('.cellpose', 'models')
+model_dir = download_model_weights()
+#model_dir = pathlib.Path('/media/carsen/DATA1/datasets_cellpose/shareable/train/models/')
 
 def check_mkl():
     return core.check_mkl()
 
-def use_gpu(gpu_number=0, torch=False):
+def use_gpu(gpu_number=0, torch=True):
     return core.use_gpu(gpu_number=gpu_number, torch=torch)
 
 def assign_device(torch, gpu):
     if gpu and use_gpu(torch=torch):
         device = core.torch_GPU if torch else core.mx_GPU
+        gpu=True
         print('>>>> using GPU')
     else:
         device = core.torch_CPU if torch else core.mx_CPU
         print('>>>> using CPU')
-    return device
+        gpu=False
+    return device, gpu
 
 def dx_to_circ(dP):
     """ dP is 2 x Y x X => 'optic' flow representation """
@@ -94,7 +97,7 @@ class Cellpose():
         run model using torch if available
 
     """
-    def __init__(self, gpu=False, model_type='cyto', net_avg=True, device=None, torch=False):
+    def __init__(self, gpu=False, model_type='cyto', net_avg=True, device=None, torch=True):
         super(Cellpose, self).__init__()
         if torch:
             if not core.TORCH_ENABLED:
@@ -104,16 +107,19 @@ class Cellpose():
         torch = ['','torch'][self.torch]
         
         # assign device (GPU or CPU)
-        self.device = device if device is not None else assign_device(torch, gpu)
+        sdevice, gpu = assign_device(torch, gpu)
+        self.device = device if device is not None else sdevice
+        self.gpu = gpu
         model_type = 'cyto' if model_type is None else model_type
-        self.pretrained_model = [os.fspath(model_dir.joinpath('%s%s_%d'%(model_type,torch,j))) for j in range(4)]
-        self.pretrained_size = os.fspath(model_dir.joinpath('size_%s%s_0.npy'%(model_type,torch)))
+        self.pretrained_model = [os.fspath(model_dir.joinpath('%s_%d'%(model_type,j))) for j in range(4)]
+        self.pretrained_size = os.fspath(model_dir.joinpath('size_%s_0.npy'%(model_type)))
+        #self.pretrained_size = os.fspath(model_dir.joinpath('%s0_size.npy'%(model_type)))
         self.diam_mean = 30. if model_type=='cyto' else 17.
         
         if not net_avg:
             self.pretrained_model = self.pretrained_model[0]
 
-        self.cp = CellposeModel(device=self.device,
+        self.cp = CellposeModel(gpu=self.gpu, device=self.device,
                                 pretrained_model=self.pretrained_model,
                                 diam_mean=self.diam_mean, torch=self.torch)
         self.cp.model_type = model_type
@@ -238,7 +244,7 @@ class Cellpose():
         nimg = len(x)
         print('processing %d image(s)'%nimg)
         # make rescale into length of x
-        if diameter is not None and diameter!=0:
+        if diameter is not None and not (not isinstance(diameter, (list, np.ndarray)) and diameter==0):
             if not isinstance(diameter, list) or len(diameter)==1 or len(diameter)<nimg:
                 diams = diameter * np.ones(nimg, np.float32)
             else:
@@ -495,7 +501,7 @@ class CellposeModel(UnetModel):
                     dP = y[:,:,:2].transpose((2,0,1))
                     niter = 1 / rescale[i] * 200
                     p = dynamics.follow_flows(-1 * dP * (cellprob > cellprob_threshold) / 5., 
-                                                niter=niter)
+                                                niter=niter, interp=False, use_gpu=self.gpu)
                     if progress is not None:
                         progress.setValue(65)
                     maski = dynamics.get_masks(p, iscell=(cellprob>cellprob_threshold),

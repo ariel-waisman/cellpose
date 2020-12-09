@@ -82,11 +82,14 @@ class UnetModel():
         self.torch = torch
         
         if device is not None:
+            self.gpu = gpu
             self.device = device
         elif gpu and use_gpu():
+            self.gpu=True
             self.device = torch.device('cuda') if self.torch else mx.gpu()
             print('>>>> using GPU')
         else:
+            self.gpu=False
             self.device = torch.device('cpu') if self.torch else mx.cpu()
             print('>>>> using CPU')
 
@@ -213,7 +216,7 @@ class UnetModel():
             model_path = self.pretrained_model[0]
             if not net_avg:
                 self.net.load_model(self.pretrained_model[0])
-                self.net.collect_params().grad_req = 'null'
+                #self.net.collect_params().grad_req = 'null'
         else:
             model_path = self.pretrained_model
 
@@ -327,7 +330,7 @@ class UnetModel():
         else:  
             for j in range(len(self.pretrained_model)):
                 self.net.load_model(self.pretrained_model[j])
-                self.net.collect_params().grad_req = 'null'
+                #self.net.collect_params().grad_req = 'null'
                 y0, style = self._run_net(img, augment=augment, tile=tile, 
                                           tile_overlap=tile_overlap, bsize=bsize)
 
